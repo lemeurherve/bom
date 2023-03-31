@@ -8,7 +8,9 @@ def mavenEnv(Map params = [:], Closure body) {
     node("maven-$params.jdk") { // no Dockerized tests; https://github.com/jenkins-infra/documentation/blob/master/ci.adoc#container-agents
         timeout(120) {
             sh 'mvn -version'
-            infra.withArtifactCachingProxy {
+            // Exclude DigitalOcean artifact caching proxy provider, currently unreliable on BOM builds
+            // TODO: remove when https://github.com/jenkins-infra/helpdesk/issues/3481 is fixed
+            infra.withArtifactCachingProxy(env.ARTIFACT_CACHING_PROXY_PROVIDER != 'do') {
                 withEnv(["MAVEN_ARGS=-Dmaven.repo.local=${WORKSPACE_TMP}/m2repo"]) {
                     body()
                 }
@@ -30,11 +32,7 @@ stage('prep') {
     mavenEnv(jdk: 11) {
         checkout scm
         withEnv(['SAMPLE_PLUGIN_OPTS=-Dset.changelist']) {
-            withCredentials([
-                usernamePassword(credentialsId: 'app-ci.jenkins.io', usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_OAUTH')
-            ]) {
-                sh 'bash prep.sh'
-            }
+            sh 'bash prep.sh'
         }
         dir('target') {
             plugins = readFile('plugins.txt').split('\n')
@@ -43,14 +41,7 @@ stage('prep') {
                 lines = [lines[0], lines[-1]] // run PCT only on newest and oldest lines, to save resources
             }
             stash name: 'pct', includes: 'pct.jar'
-            lines.each { line ->
-                def commitHashes = readFile "commit-hashes-${line}.txt"
-                launchable.install()
-                launchable("record build --name \"${BUILD_TAG}-${line}\" --no-commit-collection " + commitHashes)
-                launchable("record session --build \"${BUILD_TAG}-${line}\" --observation >launchable-session-${line}.txt")
-                stash name: "megawar-${line}", includes: "megawar-${line}.war"
-                stash name: "launchable-session-${line}.txt", includes: "launchable-session-${line}.txt"
-            }
+            lines.each {stash name: "megawar-$it", includes: "megawar-${it}.war"}
         }
         stash name: 'pct.sh', includes: 'pct.sh'
         stash name: 'excludes.txt', includes: 'excludes.txt'
@@ -67,7 +58,6 @@ lines.each {line ->
                 deleteDir()
                 unstash 'pct.sh'
                 unstash 'excludes.txt'
-                unstash "launchable-session-${line}.txt"
                 unstash 'pct'
                 unstash "megawar-$line"
                 launchable.install()
@@ -75,8 +65,7 @@ lines.each {line ->
                 withEnv(["PLUGINS=$plugin", "LINE=$line", 'EXTRA_MAVEN_PROPERTIES=maven.test.failure.ignore=true:surefire.rerunFailingTestsCount=4']) {
                     sh 'mv megawar-$LINE.war megawar.war && bash pct.sh'
                 }
-                def launchableSession = readFile("launchable-session-${line}.txt").trim()
-                launchable("record tests --session ${launchableSession} maven './**/target/surefire-reports'") // TODO add failsafe reports
+                launchable("record tests --no-build maven './**/target/surefire-reports'")
             }
         }
     }
