@@ -1,7 +1,14 @@
-properties([disableConcurrentBuilds(abortPrevious: true), buildDiscarder(logRotator(numToKeepStr: '7'))])
+final String triggerComment = '/build this'
+
+properties([disableConcurrentBuilds(abortPrevious: true), buildDiscarder(logRotator(numToKeepStr: '7')), issueCommentTrigger(triggerComment)])
 
 if (BRANCH_NAME == 'master' && currentBuild.buildCauses*._class == ['jenkins.branch.BranchEventCause']) {
   error 'No longer running builds on response to master branch pushes. If you wish to cut a release, use “Re-run checks” from this failing check in https://github.com/jenkinsci/bom/commits/master'
+}
+
+def triggerCause = currentBuild.rawBuild.getCause(org.jenkinsci.plugins.pipeline.github.trigger.IssueCommentCause)
+if (env.CHANGE_ID != null && pullRequest.labels.contains('dependencies') && !triggerCause) {
+  error "No longer running builds on dependencies pull requests. If you wish to trigger a build, use “Re-run checks” from this failing check in https://github.com/jenkinsci/bom/pull/${env.CHANGE_ID}/checks or comment “${triggerComment}” on the pull request."
 }
 
 def mavenEnv(Map params = [:], Closure body) {
