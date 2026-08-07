@@ -75,6 +75,19 @@ def retrieveArchiveFrom = ''
 def retrieveArchiveFrom = 'Tools/bom/prep-only'
 >>>>>>> 0f1ab58a (debug: retrieve prep from prep-only job for now)
 def runPrep = true
+// set to [] to use plugins.txt
+def limitedPluginSet = [
+  'jenkinsci/aws-credentials-plugin	aws-credentials',
+  'jenkinsci/aws-global-configuration-plugin	aws-global-configuration',
+  'jenkinsci/azure-credentials-plugin	azure-credentials',
+  'jenkinsci/azure-keyvault-plugin	azure-keyvault',
+  'jenkinsci/azure-sdk-plugin	azure-sdk',
+  'jenkinsci/azure-storage-plugin	windows-azure-storage',
+  'jenkinsci/badge-plugin	badge',
+  'jenkinsci/basic-branch-build-strategies-plugin	basic-branch-build-strategies',
+  'jenkinsci/cron_column-plugin	cron_column',
+  'jenkinsci/pipeline-maven-plugin	pipeline-maven,pipeline-maven-api,pipeline-maven-database',
+]
 
 stage('prep') {
   mavenEnv(jdk: 21) {
@@ -106,6 +119,10 @@ stage('prep') {
     fullTestMarkerFile = fileExists 'full-test'
     weeklyTestMarkerFile = fileExists 'weekly-test'
     def plugins = readFile('target/plugins.txt').split('\n')
+    if (limitedPluginSet) {
+      echo 'INFO: using limitedPluginSet'
+      plugins = limitedPluginSet
+    }
     pluginsByRepository = parsePlugins(plugins)
 
     lines = readFile('target/lines.txt').split('\n')
