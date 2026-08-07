@@ -74,6 +74,8 @@ stage('prep') {
       bash prep.sh
       '''
     }
+    // debug
+    archiveArtifacts 'target/*.txt'
     fullTestMarkerFile = fileExists 'full-test'
     weeklyTestMarkerFile = fileExists 'weekly-test'
     dir('target') {
