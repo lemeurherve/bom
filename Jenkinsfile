@@ -4,6 +4,10 @@ if(env.BRANCH_NAME == "master") {
   cronTrigger = '10 0 * * 5'
 }
 
+// debug
+// set to a job name to skip prep.sh and retrieve content from last success
+final String retrieveArchiveFrom = ''
+
 env.MAVEN_NTP = true
 
 properties([
@@ -67,12 +71,24 @@ def durations = [:]
 
 stage('prep') {
   mavenEnv(jdk: 21) {
-    checkout scm
-    withEnv(['SAMPLE_PLUGIN_OPTS=-Dset.changelist']) {
-      sh '''
-      mvn -v
-      bash prep.sh
-      '''
+    boolean runPrep = true
+    if (retrieveArchiveFrom) {
+      try {
+        copyArtifacts(projectName: retrieveArchiveFrom, selector: lastSuccessful(), filter: 'target.tar.gz')
+        sh 'tar -xzf target.tar.gz && rm target.tar.gz && ls . && ls target'
+        runPrep = false
+      } catch (e) {
+        echo 'WARNING: no archive found from ' + retrieveArchiveFrom
+      }
+    }
+    if (runPrep) {
+      checkout scm
+      withEnv(['SAMPLE_PLUGIN_OPTS=-Dset.changelist']) {
+        sh '''
+        mvn -v
+        bash prep.sh
+        '''
+      }
     }
     fullTestMarkerFile = fileExists 'full-test'
     weeklyTestMarkerFile = fileExists 'weekly-test'
