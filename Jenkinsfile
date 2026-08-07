@@ -66,8 +66,14 @@ def weeklyTestMarkerFile
 def durations = [:]
 
 // debug
+<<<<<<< HEAD
 // set to a job name to skip prep.sh and retrieve content from last success
 def retrieveArchiveFrom = ''
+||||||| parent of 0f1ab58a (debug: retrieve prep from prep-only job for now)
+def retrieveArchiveFrom = ''
+=======
+def retrieveArchiveFrom = 'Tools/bom/prep-only'
+>>>>>>> 0f1ab58a (debug: retrieve prep from prep-only job for now)
 def runPrep = true
 
 stage('prep') {
