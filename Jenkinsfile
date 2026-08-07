@@ -7,6 +7,19 @@ if(env.BRANCH_NAME == "master") {
 // debug
 // set to a job name to skip prep.sh and retrieve content from last success
 final String retrieveArchiveFrom = 'Tools/bom/prep-only'
+// set to [] to use plugins.txt
+final List limitedPluginSet = [
+  'jenkinsci/aws-credentials-plugin	aws-credentials',
+  'jenkinsci/aws-global-configuration-plugin	aws-global-configuration',
+  'jenkinsci/azure-credentials-plugin	azure-credentials',
+  'jenkinsci/azure-keyvault-plugin	azure-keyvault',
+  'jenkinsci/azure-sdk-plugin	azure-sdk',
+  'jenkinsci/azure-storage-plugin	windows-azure-storage',
+  'jenkinsci/badge-plugin	badge',
+  'jenkinsci/basic-branch-build-strategies-plugin	basic-branch-build-strategies',
+  'jenkinsci/cron_column-plugin	cron_column',
+  'jenkinsci/pipeline-maven-plugin	pipeline-maven,pipeline-maven-api,pipeline-maven-database',
+]
 
 env.MAVEN_NTP = true
 
@@ -93,6 +106,10 @@ stage('prep') {
     fullTestMarkerFile = fileExists 'full-test'
     weeklyTestMarkerFile = fileExists 'weekly-test'
     def plugins = readFile('target/plugins.txt').split('\n')
+    if (limitedPluginSet) {
+      echo 'INFO: using limitedPluginSet'
+      plugins = limitedPluginSet
+    }
     pluginsByRepository = parsePlugins(plugins)
 
     lines = readFile('target/lines.txt').split('\n')
