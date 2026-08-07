@@ -65,14 +65,35 @@ def fullTestMarkerFile
 def weeklyTestMarkerFile
 def durations = [:]
 
+// debug
+// set to a job name to skip prep.sh and retrieve content from last success
+def retrieveArchiveFrom = ''
+def runPrep = true
+
 stage('prep') {
   mavenEnv(jdk: 21) {
-    checkout scm
-    withEnv(['SAMPLE_PLUGIN_OPTS=-Dset.changelist']) {
-      sh '''
-      mvn -v
-      bash prep.sh
-      '''
+    if (retrieveArchiveFrom) {
+      try {
+        copyArtifacts(
+          projectName: retrieveArchiveFrom,
+          selector: lastSuccessful(),
+          filter: 'target.tar.gz',
+        )
+        // TODO: warn if not same commit
+        sh 'tar -xzf target.tar.gz && rm target.tar.gz && ls . && ls target'
+        runPrep = false
+      } catch (e) {
+        echo 'WARNING: no archive found from ' + retrieveArchiveFrom
+      }
+    }
+    if (runPrep) {
+      checkout scm
+      withEnv(['SAMPLE_PLUGIN_OPTS=-Dset.changelist']) {
+        sh '''
+        mvn -v
+        bash prep.sh
+        '''
+      }
     }
     // debug
     archiveArtifacts 'target/*.txt'
