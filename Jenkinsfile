@@ -6,7 +6,7 @@ if(env.BRANCH_NAME == "master") {
 
 // debug
 // set to a job name to skip prep.sh and retrieve content from last success
-final String retrieveArchiveFrom = ''
+final String retrieveArchiveFrom = 'Tools/bom/prep-only'
 
 env.MAVEN_NTP = true
 
