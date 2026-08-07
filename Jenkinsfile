@@ -87,6 +87,8 @@ stage('prep') {
       stash name: line, includes: "pct.sh,excludes.txt,bom-*/excludes.txt,target/pct.jar,target/megawar-${line}.war"
     }
     infra.prepareToPublishIncrementals()
+    // debug
+    archiveArtifacts 'target/*.txt'
   }
 }
 
