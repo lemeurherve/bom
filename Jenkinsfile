@@ -78,27 +78,39 @@ boolean weeklyTest = false
 boolean consumeIncrementals = false
 def splits = [:]
 def durations = [:]
+def commit
 
 mavenEnv(jdk: 21) {
   stage('prep') {
-    checkout scm
-    consumeIncrementalsMarkerFile = fileExists 'consume-incrementals'
-    consumeIncrementals = consumeIncrementalsMarkerFile || (env.CHANGE_ID && pullRequest.labels.contains('consume-incrementals'))
-    if (!consumeIncrementals) {
-      echo 'Forbidding use of incremental dependencies. If you need to consume incrementals, add the `consume-incrementals` label, or add a file named `consume-incrementals` to the repository root if you lack triage permission. Then keep this PR in draft until the dependencies have been switched to release versions.'
-    }
-    withChecks(name: 'Tests', includeStage: true) {
-      withEnv(['SAMPLE_PLUGIN_OPTS=-Dset.changelist', "CONSUME_INCREMENTALS=${consumeIncrementals}"]) {
-        sh '''
-        mvn -v
-        bash prep.sh
-        '''
+    commit = checkout(scm).GIT_COMMIT
+    try {
+      copyArtifacts(projectName: env.JOB_NAME, selector: lastWithArtifacts(), filter: 'prep.tar.gz', fingerprintArtifacts: true)
+      publishChecks(name: 'Tests / prep')
+      sh 'tar -xzvf prep.tar.gz && rm prep.tar.gz'
+    } catch(e) {
+      consumeIncrementalsMarkerFile = fileExists 'consume-incrementals'
+      consumeIncrementals = consumeIncrementalsMarkerFile || (env.CHANGE_ID && pullRequest.labels.contains('consume-incrementals'))
+      if (!consumeIncrementals) {
+        echo 'Forbidding use of incremental dependencies. If you need to consume incrementals, add the `consume-incrementals` label, or add a file named `consume-incrementals` to the repository root if you lack triage permission. Then keep this PR in draft until the dependencies have been switched to release versions.'
       }
-      if (junit(testResults: '**/target/surefire-reports/TEST-*.xml,**/target/failsafe-reports/TEST-*.xml').failCount > 0) {
-        error 'Some test failures during prep.sh, not going to continue'
+      withChecks(name: 'Tests', includeStage: true) {
+        withEnv(['SAMPLE_PLUGIN_OPTS=-Dset.changelist', "CONSUME_INCREMENTALS=${consumeIncrementals}"]) {
+          sh '''
+          mvn -v
+          bash prep.sh
+          '''
+        }
+        if (junit(testResults: '**/target/surefire-reports/TEST-*.xml,**/target/failsafe-reports/TEST-*.xml').failCount > 0) {
+          error 'Some test failures during prep.sh, not going to continue'
+        }
+        // infra.prepareToPublishIncrementals()
       }
+      // archive tar of all files produced by prep.sh used after the "prep" stage of the main bom job
+      writeFile file: "target/commit-${commit}.txt", text: env.BUILD_URL
+      sh "tar -czvf prep.tar.gz pct.sh incrementals.sh ${consumeIncrementalsMarkerFile ? 'consume-incrementals' : ''} excludes.txt bom-*/excludes.txt target/pct.jar target/megawar-* target/*.txt **/pom.xml sample-plugin/target/surefire-reports/TEST-*.xml"
+      archiveArtifacts artifacts: 'prep.tar.gz,target/*.txt', fingerprint: true
+      sh 'rm prep.tar.gz'
     }
-    infra.prepareToPublishIncrementals()
 
     fullTestMarkerFile = fileExists 'full-test'
     weeklyTestMarkerFile = fileExists 'weekly-test'
@@ -213,7 +225,8 @@ if (BRANCH_NAME == 'master' || fullTest || weeklyTest) {
           </testsuite>
         """
         writeFile file: 'bom-report.xml', text: content
-        archiveArtifacts artifacts: 'bom-report.xml'
+        // archiveArtifacts artifacts: 'bom-report.xml'
+        sh 'cat bom-report.xml || true'
         junit allowEmptyResults: true, testResults: 'bom-report.xml'
       }
     }
@@ -236,5 +249,5 @@ stage('checks') {
 }
 
 stage('publish incrementals') {
-  infra.maybePublishIncrementals()
+  // infra.maybePublishIncrementals()
 }
