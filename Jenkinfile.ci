@@ -1,6 +1,9 @@
 // Adapted from https://github.com/jenkinsci/bom/blob/master/Jenkinsfile
 
 def pluginsByRepository
+def line = 'weekly'
+def maxSplitsPerLine = 20
+def splits = [:]
 
 @NonCPS
 def parsePlugins(plugins) {
@@ -44,37 +47,47 @@ if (params.PLUGINS) {
   }
 }
 
+pluginsByRepository.eachWithIndex { repository, repoPlugins, idx ->
+    def index = (idx % maxSplitsPerLine) + 1 // to get split1 to split<maxSplitsPerLine>
+    def name = "split-${index}:${line}"
+    splits[name] = splits[name] ?: []
+    splits[name] << repository
+}
+
 def branches = [failFast: false]
-pluginsByRepository.each { repository, plugins ->
+splits.each { split, repositories ->
     if (repository == 'azure-credentials-plugin') {
         // skip known problematic plugin in this environment
         return
     }
-    branches["pct-$repository"] = {
+    branches["${split} [${repositories.size()}]"] = {
         timestamps {
             node('linux') {
                 def mvn = tool name: 'maven-3.9', type: 'maven'
                 def jdk = tool name: "jdk21", type: 'jdk'
                 unstash 'basics'
-                withEnv([
-                    "PATH+MVN=${mvn}/bin",
-                    "PATH+JDK=${jdk}/bin",
-                    "JAVA_HOME=${jdk}",
-                    "M2_HOME=${mvn}",
-                    'EXTRA_MAVEN_PROPERTIES=maven.test.failure.ignore=true:surefire.rerunFailingTestsCount=1',
-                    "PLUGINS=${plugins.join(',')}",
-                    'LINE=weekly'
-                ]) {
-                    configFileProvider([configFile(fileId: 'repo.jenkins-ci.org', variable: 'SETTINGS')]) {
-                        timeout(time: 2, unit: 'HOURS') {
-                            sh 'MAVEN_ARGS="-s $SETTINGS" bash pct.sh'
+                repositories.eachWithIndex { repository, idx ->
+                    stage("${repository} (${idx + 1}/${repositories.size()})") {
+                        withEnv([
+                            "PATH+MVN=${mvn}/bin",
+                            "PATH+JDK=${jdk}/bin",
+                            "JAVA_HOME=${jdk}",
+                            "M2_HOME=${mvn}",
+                            'EXTRA_MAVEN_PROPERTIES=maven.test.failure.ignore=true:surefire.rerunFailingTestsCount=1',
+                            "PLUGINS=${plugins.join(',')}",
+                            "LINE=${line}"
+                        ]) {
+                            configFileProvider([configFile(fileId: 'repo.jenkins-ci.org', variable: 'SETTINGS')]) {
+                                timeout(time: 2, unit: 'HOURS') {
+                                    sh 'MAVEN_ARGS="-s $SETTINGS" bash pct.sh'
+                                }
+                            }
+                            junit(testResults: '**/target/surefire-reports/TEST-*.xml,**/target/failsafe-reports/TEST-*.xml')
                         }
                     }
-                    junit(testResults: '**/target/surefire-reports/TEST-*.xml,**/target/failsafe-reports/TEST-*.xml')
                 }
             }
         }
     }
 }
-
 parallel branches
