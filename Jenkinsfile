@@ -73,6 +73,7 @@ def results = [:]
 def commit
 def pctDuration
 def reportNamePrefix = 'bom-report_'
+def stashGlob = 'pct.sh,incrementals.sh,consume-incrementals,excludes.txt,bom-*/excludes.txt,target/pct.jar,target/megawar-REPLACEME_LINE.war'
 
 mavenEnv(jdk: 21) {
   stage('prep') {
@@ -82,15 +83,42 @@ mavenEnv(jdk: 21) {
     if (!consumeIncrementals) {
       echo 'Forbidding use of incremental dependencies. If you need to consume incrementals, add the `consume-incrementals` label, or add a file named `consume-incrementals` to the repository root if you lack triage permission. Then keep this PR in draft until the dependencies have been switched to release versions.'
     }
-    withChecks(name: 'Tests', includeStage: true) {
-      withEnv(['SAMPLE_PLUGIN_OPTS=-Dset.changelist', "CONSUME_INCREMENTALS=${consumeIncrementals}"]) {
-        sh '''
-        mvn -v
-        bash prep.sh
-        '''
+    def archiveName = "prep_${commit}_${env.CHANGE_FORK ?: 'jenkinsci'}${consumeIncrementals ? '_consume-incrementals' : ''}.tar.gz"
+    try {
+      try {
+        echo "INFO: trying to copy ${archiveName} from last completed build with the same archive name"
+        copyArtifacts(projectName: env.JOB_NAME, parameters: "ARCHIVE_NAME=${archiveName}", selector: lastCompleted(), filter: archiveName, fingerprintArtifacts: true)
+      } catch (copyError) {
+        try {
+          echo "INFO: trying to copy ${archiveName} from last successful 'Tools/bom/prep-only' with the same archive name"
+          copyArtifacts(projectName: 'Tools/bom/prep-only', parameters: "ARCHIVE_NAME=${archiveName}", selector: lastCompleted(), filter: archiveName, fingerprintArtifacts: true)
+        } catch (anotherCopyError) {
+          echo "INFO: starting downstream job to prepare ${archiveName} from 'Tools/bom/prep-only'"
+          def archiveBuild = build(job: 'Tools/bom/prep-only', parameters: [string(name: 'ARCHIVE_NAME', value: archiveName)], wait: true, propagate: true)
+          echo "INFO: copying ${archiveName} from 'Tools/bom/prep-only' build n°${archiveBuild.number}"
+          copyArtifacts(projectName: 'Tools/bom/prep-only', parameters: "ARCHIVE_NAME=${archiveName}", selector: specific("${archiveBuild.number}"), filter: archiveName, fingerprintArtifacts: true)
+        }
       }
-      if (junit(testResults: '**/target/surefire-reports/TEST-*.xml,**/target/failsafe-reports/TEST-*.xml').failCount> 0) {
-        error 'Some test failures during prep.sh, not going to continue'
+      archiveArtifacts artifacts: archiveName, fingerprint: true
+      sh('tar -xzvf ' + archiveName + ' && rm -v ' + archiveName)
+      sh 'mkdir -p "${MVN_LOCAL_REPO}/io/jenkins/tools/bom/" && cp -a mvn-local-repo-bom/. "${MVN_LOCAL_REPO}/io/jenkins/tools/bom/"'
+      sh 'rm -rfv mvn-local-repo-bom'
+
+      // Debug
+      sh 'git status'
+      sh 'git --no-pager diff'
+    } catch (e) {
+      echo 'WARNING: could not retrieve prep archive from prep-only job'
+      withChecks(name: 'Tests', includeStage: true) {
+        withEnv(['SAMPLE_PLUGIN_OPTS=-Dset.changelist', "CONSUME_INCREMENTALS=${consumeIncrementals}"]) {
+          sh '''
+          mvn -v
+          bash prep.sh
+          '''
+        }
+        if (junit(testResults: '**/target/surefire-reports/TEST-*.xml,**/target/failsafe-reports/TEST-*.xml').failCount> 0) {
+          error 'Some test failures during prep.sh, not going to continue'
+        }
       }
     }
     infra.prepareToPublishIncrementals()
@@ -158,7 +186,7 @@ mavenEnv(jdk: 21) {
   }
   stage('stash line(s)') {
     lines.each { line ->
-      stash name: line, includes: "pct.sh,incrementals.sh,consume-incrementals,excludes.txt,bom-*/excludes.txt,target/pct.jar,target/megawar-${line}.war"
+      stash name: line, includes: stashGlob.replace('REPLACEME_LINE', line)
     }
   }
 }
