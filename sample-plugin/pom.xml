@@ -14,7 +14,7 @@
   <properties>
     <changelist>999999-SNAPSHOT</changelist>
     <bom>weekly</bom>
-    <jenkins.version>2.578</jenkins.version>
+    <jenkins.version>2.579-rc38565.52145a_d682b_a_</jenkins.version>
     <spotless.check.skip>false</spotless.check.skip>
   </properties>
   <dependencyManagement>
@@ -1730,21 +1730,21 @@
       <id>2.568.x</id>
       <properties>
         <bom>2.568.x</bom>
-        <jenkins.version>2.568.1</jenkins.version>
+        <jenkins.version>2.579-rc38565.52145a_d682b_a_</jenkins.version>
       </properties>
     </profile>
     <profile>
       <id>2.555.x</id>
       <properties>
         <bom>2.555.x</bom>
-        <jenkins.version>2.555.3</jenkins.version>
+        <jenkins.version>2.579-rc38565.52145a_d682b_a_</jenkins.version>
       </properties>
     </profile>
     <profile>
       <id>2.541.x</id>
       <properties>
         <bom>2.541.x</bom>
-        <jenkins.version>2.541.3</jenkins.version>
+        <jenkins.version>2.579-rc38565.52145a_d682b_a_</jenkins.version>
       </properties>
     </profile>
   </profiles>
