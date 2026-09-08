@@ -1,7 +1,7 @@
 // Do not trigger build regularly on change requests as it costs a lot
 String cronTrigger = ''
 if(env.BRANCH_NAME == "master") {
-  cronTrigger = '10 0 * * 4'
+  cronTrigger = '15 10 * * 1'
 }
 
 env.MAVEN_NTP = true
@@ -72,6 +72,7 @@ def splits = [:]
 def results = [:]
 def commit
 def pctDuration
+def reportNamePrefix = 'bom-report_'
 
 mavenEnv(jdk: 21) {
   stage('prep') {
@@ -116,18 +117,43 @@ mavenEnv(jdk: 21) {
     echo "${pluginsByRepository.size()} repositories:\n${plugins.join('\n')}"
     echo "${lines.size()} lines: ${lines.join(' ')}"
 
-    // Fixed splits, each split using only one line
+    def currentRepositories = pluginsByRepository.keySet().sort()
+    // Balanced splits, each split using only one line
     lines.each { line ->
-      pluginsByRepository.eachWithIndex { repository, repoPlugins, idx ->
-        def index = (idx % maxSplitsPerLine) + 1 // to get split1 to split<maxSplitsPerLine>
-        def name = "split-${index}:${line}"
-        splits[name] = splits[name] ?: []
-        splits[name] << repository
+      // Retrieve splits from last completed build's junit records from bom report stages
+      def splitsFromJunitRecords = splitTests(parallelism: count(maxSplitsPerLine), testMode: testCase(), stage: "${reportNamePrefix}${line}")
+      // As splitTests returns exclusion lists, we need to list first all its test cases (repositories)
+      def previousRepositories = [] as Set
+      splitsFromJunitRecords.each { exclusions ->
+        exclusions.each { repository ->
+          // Keep one of each exclusion list items that are in current repositories
+          if (!previousRepositories.contains(repository) && currentRepositories.contains(repository)) previousRepositories << repository
+        }
+      }
+      def balancedSplits = splitsFromJunitRecords.collect { exclusions ->
+        previousRepositories - exclusions
+      }
+      def newRepositories = currentRepositories - previousRepositories
+      echo "INFO: ${previousRepositories.size()} repositories returned by splitTests from junit records for '${line}' line"
+      echo "INFO: ${newRepositories.size()} new repositor${newRepositories.size() <= 1 ? 'y' : 'ies' } not returned by splitTests for '${line}' line"
+
+      // Generate current line's splits
+      balancedSplits.eachWithIndex { repositories, i ->
+        splits["split-${(i + 1).toString().padLeft(2, '0')}:${line}"] = repositories
+      }
+      if (newRepositories) {
+        // Fixed splits by default for the remaining new repositories
+        newRepositories.eachWithIndex { repository, idx ->
+          def index = ((idx % maxSplitsPerLine) + 1).toString().padLeft(2, '0') // to get split01 to split<maxSplitsPerLine>
+          def name = "new-${index}:${line}"
+          splits[name] = splits[name] ?: []
+          splits[name] << repository
+        }
       }
     }
     echo "${splits.size()} split(s)"
     echo splits.collect { split, repositories ->
-      "${split} (${repositories.size()}) ${repositories}"
+      "${split} [${repositories.size()}]:\n - ${repositories.join('\n - ')}"
     }.join('\n')
   }
   stage('stash line(s)') {
@@ -211,32 +237,36 @@ if (BRANCH_NAME == 'master' || fullTest || weeklyTest) {
   }
   node('maven-bom') {
     stage('reports') {
-      def branches = [:]
       lines.each { line ->
-        def testSuiteName = "bom-report_${line}"
+        def testSuiteName = "${reportNamePrefix}${line}"
         // We need junit records in distinct stages later on for splitTests
         // Otherwise it would try to balance all repositories across all lines
         // While we want one line per split (agent)
-        branches[testSuiteName] = {
+        stage(testSuiteName) {
           def testCases = []
+          def testSuiteAttributes = [
+            name: testSuiteName, line: line, time: pctDuration, commit: commit, build: env.BUILD_URL
+          ].collect { key, value -> "${key}=\"${value}\"" }.join(' ')
           results.each { combination, result ->
             def repository = combination.split(':')[0]
             def resultLine = combination.split(':')[1]
             if (line == resultLine) {
-              testCases << '<testcase split="' + result['split'] + '" name="' + repository + '" classname="pct-report.' + repository + '" time="' + result['elapsed'] + '" readyin="' + result['readyIn'] + '" attempt="' + result['attempt'] + '"/>\n'
+              def testCaseAttributes = [
+                split: result['split'],
+                name: repository,
+                classname: "pct-report.${repository}",
+                time: result['elapsed'],
+                readyin: result['readyIn'],
+                attempt: result['attempt'],
+              ].collect { key, value -> "${key}=\"${value}\"" }.join(' ')
+              testCases << '  <testcase ' + testCaseAttributes + '/>'
             }
           }
-          def content = """<?xml version="1.0" encoding="UTF-8"?>
-            <testsuite name="${testSuiteName}" line="${line}" pctduration="${pctDuration}" commit="${commit}" build="${env.BUILD_URL}">
-            ${testCases.sort().join('\n')}
-            </testsuite>
-          """
+          def content = '<?xml version="1.0" encoding="UTF-8"?>\n<testsuite ' + testSuiteAttributes + '>\n' + testCases.sort().join('\n') + '\n</testsuite>\n'
           writeFile file: "${testSuiteName}.xml", text: content
           junit testResults: "${testSuiteName}.xml"
-          archiveArtifacts artifacts: "${testSuiteName}.xml"
         }
       }
-      parallel branches
     }
   }
 }
